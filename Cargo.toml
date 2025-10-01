@@ -1,0 +1,22 @@
+[package]
+name = "smelter-crash"
+version = "0.1.0"
+edition = "2021"
+default-run = "smelter-crash"
+
+[[bin]]
+name = "process_helper"
+path = "src/bin/process_helper.rs"
+
+[dependencies]
+# Compositor integration
+compositor_pipeline = { git = "https://github.com/software-mansion/live-compositor.git", rev = "34a01fe", features = ["web_renderer"] }
+compositor_render = { git = "https://github.com/software-mansion/live-compositor.git", rev = "34a01fe", features = ["web_renderer"] }
+
+# Graphics (required by compositor)
+wgpu = "25.0.2"
+
+# Error handling and utilities
+anyhow = "1.0.71"
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter", "json"] }
