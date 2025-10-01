@@ -12,6 +12,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tracing::info;
+use std::thread;
 
 const WIDTH: usize = 1920;
 const HEIGHT: usize = 1080;
@@ -29,7 +30,8 @@ fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
 
     let mut use_web = false;
-    let mut duration_arg = None;
+    let mut record_duration: Option<Duration> = None;
+    let mut run_duration: Option<Duration> = None;
     let mut allocate_ram: Option<String> = None;
 
     let mut i = 1;
@@ -44,29 +46,36 @@ fn main() -> Result<()> {
             }
             allocate_ram = Some(args[i + 1].clone());
             i += 2;
-        } else if duration_arg.is_none() {
-            duration_arg = Some(arg.clone());
+        } else if arg == "--rec" {
+            if i + 1 >= args.len() {
+                return Err(anyhow!("--rec requires a duration (e.g., 5s, 10m, 2h)"));
+            }
+            record_duration = Some(parse_duration(&args[i + 1])?);
+            i += 2;
+        } else if run_duration.is_none() {
+            run_duration = Some(parse_duration(&arg)?);
             i += 1;
         } else {
             return Err(anyhow!("Unknown argument: {}", arg));
         }
     }
 
-    let duration = match duration_arg {
-        Some(d) => parse_duration(&d)?,
+    let duration = match run_duration {
+        Some(d) => d,
         None => {
-            eprintln!("Usage: {} [--web] [--ram <size>] <duration>", args[0]);
+            eprintln!("Usage: {} [--web] [--ram <size>] [--rec <duration>] <duration>", args[0]);
             eprintln!("");
             eprintln!("Arguments:");
-            eprintln!("  <duration>        Duration to record (e.g., 5s, 10m, 2h, 6h30m)");
+            eprintln!("  <duration>        Duration to run (e.g., 5s, 10m, 2h, 6h30m)");
             eprintln!("  --web             Use web renderer instead of MP4 input (default: MP4)");
             eprintln!("  --ram <size>      Allocate memory before starting (e.g., 100M, 2G)");
+            eprintln!("  --rec <duration>  Record to MP4 file for this duration (default: raw output only)");
             eprintln!("");
             eprintln!("Examples:");
-            eprintln!("  {} 5s                - Record MP4 for 5 seconds", args[0]);
-            eprintln!("  {} --web 10m         - Record web page for 10 minutes", args[0]);
-            eprintln!("  {} --ram 500M 5s     - Allocate 500MB RAM and record MP4", args[0]);
-            eprintln!("  {} --ram 2G --web 1h - Allocate 2GB RAM and record web page", args[0]);
+            eprintln!("  {} 5s                    - Run with raw output for 5 seconds", args[0]);
+            eprintln!("  {} --rec 5s 5s           - Record MP4 for 5 seconds", args[0]);
+            eprintln!("  {} --web --rec 10m 10m   - Record web page to MP4 for 10 minutes", args[0]);
+            eprintln!("  {} --ram 2G --web 1h     - Allocate 2GB RAM, run web page for 1 hour (raw output)", args[0]);
             return Err(anyhow!("Missing duration argument"));
         }
     };
@@ -96,9 +105,9 @@ fn main() -> Result<()> {
         InputSource::Mp4
     };
 
-    // Remove existing output file if it exists
+    // Remove existing output file if it exists (only for MP4 recording)
     let output_path = PathBuf::from(OUTPUT_VIDEO);
-    if output_path.exists() {
+    if record_duration.is_some() && output_path.exists() {
         std::fs::remove_file(&output_path)?;
         info!("Removed existing output file");
     }
@@ -235,47 +244,85 @@ fn main() -> Result<()> {
         }
     };
 
-    // Register MP4 output
-    let output_id = OutputId(Arc::from("mp4_output"));
-    Pipeline::register_output(
-        &pipeline,
-        output_id.clone(),
-        RegisterOutputOptions {
-            output_options: OutputOptions::Mp4(mp4::Mp4OutputOptions {
-                output_path: output_path.clone(),
-                video: Some(VideoEncoderOptions::H264(ffmpeg_h264::Options {
-                    preset: ffmpeg_h264::EncoderPreset::Medium,
-                    resolution: Resolution {
-                        width: WIDTH,
-                        height: HEIGHT,
-                    },
-                    raw_options: vec![],
-                    pixel_format: OutputPixelFormat::YUV420P,
-                })),
+    // Register output (MP4 or raw data)
+    let output_id = OutputId(Arc::from("output"));
+
+    if let Some(rec_duration) = record_duration {
+        // MP4 recording mode
+        Pipeline::register_output(
+            &pipeline,
+            output_id.clone(),
+            RegisterOutputOptions {
+                output_options: OutputOptions::Mp4(mp4::Mp4OutputOptions {
+                    output_path: output_path.clone(),
+                    video: Some(VideoEncoderOptions::H264(ffmpeg_h264::Options {
+                        preset: ffmpeg_h264::EncoderPreset::Medium,
+                        resolution: Resolution {
+                            width: WIDTH,
+                            height: HEIGHT,
+                        },
+                        raw_options: vec![],
+                        pixel_format: OutputPixelFormat::YUV420P,
+                    })),
+                    audio: None,
+                }),
+                video: Some(OutputVideoOptions {
+                    initial: scene,
+                    end_condition: PipelineOutputEndCondition::Never,
+                }),
                 audio: None,
-            }),
-            video: Some(OutputVideoOptions {
-                initial: scene,
-                end_condition: PipelineOutputEndCondition::Never,
-            }),
-            audio: None,
-        },
-    )?;
-    info!("Started recording to {} for {:?}", output_path.display(), duration);
+            },
+        )?;
+        info!("Started recording to {} for {:?}", output_path.display(), rec_duration);
+    } else {
+        // Raw output mode - just read frames but don't save to disk
+        let receiver = Pipeline::register_raw_data_output(
+            &pipeline,
+            output_id.clone(),
+            RegisterOutputOptions {
+                output_options: RawDataOutputOptions {
+                    video: Some(RawVideoOptions {
+                        resolution: Resolution {
+                            width: WIDTH,
+                            height: HEIGHT,
+                        },
+                    }),
+                    audio: None,
+                },
+                video: Some(OutputVideoOptions {
+                    initial: scene,
+                    end_condition: PipelineOutputEndCondition::Never,
+                }),
+                audio: None,
+            },
+        )?;
+
+        // Spawn thread to consume frames (and discard them)
+        if let Some(video_receiver) = receiver.video {
+            thread::spawn(move || {
+                while let Ok(frame) = video_receiver.recv() {
+                    // Just receive and drop frames - do nothing with them
+                    drop(frame);
+                }
+            });
+        }
+
+        info!("Started raw output mode for {:?}", duration);
+    }
 
     // Handle event loop based on input source
     match input_source {
         InputSource::Web => {
             // Web rendering requires the event loop to run on the main thread
-            // Spawn a thread to handle the recording duration and stop
+            // Spawn a thread to handle the duration and stop
             let pipeline_clone = pipeline.clone();
             let output_id_clone = output_id.clone();
-            let output_path_clone = output_path.clone();
-            std::thread::spawn(move || {
-                // Record for specified duration
-                std::thread::sleep(duration);
+            let is_recording = record_duration.is_some();
+            thread::spawn(move || {
+                // Run for specified duration
+                thread::sleep(duration);
 
-                // Stop recording
+                // Stop output
                 let mut pipeline_lock = pipeline_clone.lock().unwrap();
                 if let Err(e) = Pipeline::unregister_output(&mut *pipeline_lock, &output_id_clone) {
                     eprintln!("Error unregistering output: {}", e);
@@ -283,9 +330,13 @@ fn main() -> Result<()> {
                 drop(pipeline_lock);
 
                 // Give it a moment to finalize
-                std::thread::sleep(Duration::from_secs(1));
+                thread::sleep(Duration::from_secs(1));
 
-                info!("Recording complete: {}", output_path_clone.display());
+                if is_recording {
+                    info!("Recording complete");
+                } else {
+                    info!("Run complete");
+                }
                 std::process::exit(0);
             });
 
@@ -295,17 +346,21 @@ fn main() -> Result<()> {
         }
         InputSource::Mp4 => {
             // MP4 input doesn't need event loop, just wait for duration
-            std::thread::sleep(duration);
+            thread::sleep(duration);
 
-            // Stop recording
+            // Stop output
             let mut pipeline_lock = pipeline.lock().unwrap();
             Pipeline::unregister_output(&mut *pipeline_lock, &output_id)?;
             drop(pipeline_lock);
 
             // Give it a moment to finalize
-            std::thread::sleep(Duration::from_secs(1));
+            thread::sleep(Duration::from_secs(1));
 
-            info!("Recording complete: {}", output_path.display());
+            if record_duration.is_some() {
+                info!("Recording complete");
+            } else {
+                info!("Run complete");
+            }
         }
     }
 

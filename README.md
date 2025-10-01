@@ -23,16 +23,17 @@ cargo build --release
 ## Usage
 
 ```bash
-cargo run -- [--web] [--ram <size>] <duration>
+cargo run -- [--web] [--ram <size>] [--rec <duration>] <duration>
 ```
 
 ### Arguments
 
-- `<duration>` - Duration to record (required)
+- `<duration>` - Duration to run (required)
 - `--web` - Use web renderer instead of MP4 input (optional, default: MP4)
 - `--ram <size>` - Allocate memory before starting (optional, e.g., 100M, 2G)
+- `--rec <duration>` - Record to MP4 file for this duration (optional, default: raw output only)
 
-**Note:** By default, the program records from the MP4 file in `assets/test.mp4`. Use `--web` flag to capture a web page instead.
+**Note:** By default, the program uses the MP4 file in `assets/test.mp4` as input. Use `--web` flag to render a web page instead. Without `--rec`, frames are generated and consumed but not saved to disk.
 
 ### Duration Format
 
@@ -47,26 +48,29 @@ You can combine multiple units:
 ### Examples
 
 ```bash
-# Record MP4 for 5 seconds (default)
+# Run with raw output for 5 seconds (no recording)
 cargo run -- 5s
 
-# Record MP4 for 10 minutes
-cargo run -- 10m
+# Record MP4 for 5 seconds
+cargo run -- --rec 5s 5s
 
-# Record web page for 5 seconds
+# Record MP4 for 10 minutes
+cargo run -- --rec 10m 10m
+
+# Run web page for 5 seconds (raw output, no recording)
 cargo run -- --web 5s
 
-# Record web page for 2 hours
-cargo run -- --web 2h
+# Record web page to MP4 for 5 seconds
+cargo run -- --web --rec 5s 5s
 
 # Record web page for 6 hours and 30 minutes
-cargo run -- --web 6h30m
+cargo run -- --web --rec 6h30m 6h30m
 
-# Allocate 500MB RAM and record MP4 for 5 seconds
+# Allocate 500MB RAM and run MP4 input for 5 seconds (raw output)
 cargo run -- --ram 500M 5s
 
 # Allocate 2GB RAM and record web page for 1 hour
-cargo run -- --ram 2G --web 1h
+cargo run -- --ram 2G --web --rec 1h 1h
 ```
 
 ## Configuration
@@ -80,7 +84,9 @@ You can modify the following constants in `src/main.rs`:
 
 ## Output
 
-The program will create `output.mp4` in the current directory. If the file already exists, it will be deleted before recording starts.
+When using `--rec`, the program creates `output.mp4` in the current directory. If the file already exists, it will be deleted before recording starts.
+
+Without `--rec`, the program runs in raw output mode - frames are rendered and consumed through a channel but not saved to disk. This is useful for testing rendering performance without the overhead of encoding and writing to disk.
 
 ## Project Structure
 
