@@ -24,12 +24,10 @@ fn main() -> Result<()> {
 
     info!("Starting minimal smelter compositor");
 
-    // Allocate RAM if requested (before initializing compositor)
-    let _allocated_memory = if let Some(ram_size) = &args.allocate_ram {
-        Some(ram::allocate(ram_size)?)
-    } else {
-        None
-    };
+    // Allocate and hold RAM if requested
+    if let Some(ram_size) = args.allocate_ram {
+        ram::allocate_and_hold(ram_size)?;
+    }
 
     // Initialize graphics context
     let graphics_context = GraphicsContext::new(compositor_pipeline::pipeline::GraphicsContextOptions {

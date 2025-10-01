@@ -1,12 +1,30 @@
 use anyhow::{anyhow, Result};
+use std::thread;
+use std::time::Duration;
 use tracing::info;
 
-pub fn allocate(ram_size: &str) -> Result<Vec<u8>> {
-    let bytes = parse_memory_size(ram_size)?;
-    info!("Allocating {} bytes ({}) of RAM...", bytes, ram_size);
-    let memory: Vec<u8> = vec![0; bytes];
-    info!("Successfully allocated {} of RAM", ram_size);
-    Ok(memory)
+pub fn allocate_and_hold(ram_size: String) -> Result<()> {
+    let bytes = parse_memory_size(&ram_size)?;
+
+    thread::spawn(move || {
+        info!("Allocating {} of RAM...", ram_size);
+        let mut memory: Vec<u8> = vec![0; bytes];
+
+        // Force actual memory allocation by writing to every page (typically 4KB)
+        let page_size = 4096;
+        for i in (0..bytes).step_by(page_size) {
+            memory[i] = 1;
+        }
+
+        info!("Allocated {} of RAM, holding indefinitely", ram_size);
+
+        // Keep the memory allocated forever
+        loop {
+            thread::sleep(Duration::from_secs(3600));
+        }
+    });
+
+    Ok(())
 }
 
 fn parse_memory_size(input: &str) -> Result<usize> {
