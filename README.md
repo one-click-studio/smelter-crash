@@ -17,3 +17,7 @@ cargo run -- [OPTIONS]
 - `--web` - Use web renderer (default: MP4 from `assets/test.mp4`)
 - `--ram <size>` - Allocate RAM before starting (e.g., `100M`, `2G`)
 - `--help` - Show options and some examples
+
+## Crash
+- Does run: `cargo run -- --web`
+- Crashes with "Illegal instruction" after a while: `cargo run -- --web --ram 3G`
