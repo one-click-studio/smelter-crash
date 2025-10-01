@@ -48,7 +48,7 @@ fn main() -> Result<()> {
             ahead_of_time_processing: false,
             output_framerate: Framerate { num: 30, den: 1 },
             run_late_scheduled_events: true,
-            never_drop_output_frames: false,
+            never_drop_output_frames: true, // Never drop frames - use blocking send instead of send_deadline
         },
         stream_fallback_timeout: Duration::from_millis(500),
         web_renderer: compositor_render::web_renderer::WebRendererInitOptions {

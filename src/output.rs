@@ -7,7 +7,6 @@ use compositor_render::scene::Component;
 use compositor_render::{OutputId, Resolution};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::thread;
 use std::time::Duration;
 use tracing::info;
 
@@ -76,14 +75,34 @@ pub fn setup_raw_output(
         },
     )?;
 
-    // Spawn thread to consume frames (and discard them)
+    // Spawn thread to consume frames as fast as possible
     if let Some(video_receiver) = receiver.video {
-        thread::spawn(move || {
-            while let Ok(frame) = video_receiver.recv() {
-                // Just receive and drop frames - do nothing with them
-                drop(frame);
-            }
-        });
+        std::thread::Builder::new()
+            .name("frame_consumer".to_string())
+            .spawn(move || {
+                let mut consecutive_errors = 0u64;
+
+                // Simply receive and let frames drop immediately - no storage, no batching
+                loop {
+                    match video_receiver.recv() {
+                        Ok(_frame) => {
+                            consecutive_errors = 0;
+                        }
+                        Err(e) => {
+                            consecutive_errors += 1;
+                            info!("Frame consumer recv error #{}: {:?}", consecutive_errors, e);
+                            if consecutive_errors > 10 {
+                                info!("Too many consecutive errors, exiting consumer thread");
+                                break;
+                            }
+                            std::thread::sleep(Duration::from_millis(10));
+                        }
+                    }
+                }
+            })
+            .expect("Failed to spawn frame consumer thread");
+    } else {
+        info!("Warning: No video receiver available for raw output");
     }
 
     info!("Started raw output mode (running indefinitely)");
