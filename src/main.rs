@@ -30,32 +30,64 @@ fn main() -> Result<()> {
 
     let mut use_web = false;
     let mut duration_arg = None;
+    let mut allocate_ram: Option<String> = None;
 
-    for arg in args.iter().skip(1) {
+    let mut i = 1;
+    while i < args.len() {
+        let arg = &args[i];
         if arg == "--web" {
             use_web = true;
+            i += 1;
+        } else if arg == "--ram" {
+            if i + 1 >= args.len() {
+                return Err(anyhow!("--ram requires a value (e.g., 100M, 2G)"));
+            }
+            allocate_ram = Some(args[i + 1].clone());
+            i += 2;
         } else if duration_arg.is_none() {
-            duration_arg = Some(arg.as_str());
+            duration_arg = Some(arg.clone());
+            i += 1;
         } else {
             return Err(anyhow!("Unknown argument: {}", arg));
         }
     }
 
     let duration = match duration_arg {
-        Some(d) => parse_duration(d)?,
+        Some(d) => parse_duration(&d)?,
         None => {
-            eprintln!("Usage: {} [--web] <duration>", args[0]);
+            eprintln!("Usage: {} [--web] [--ram <size>] <duration>", args[0]);
             eprintln!("");
             eprintln!("Arguments:");
-            eprintln!("  <duration>    Duration to record (e.g., 5s, 10m, 2h, 6h30m)");
-            eprintln!("  --web         Use web renderer instead of MP4 input (default: MP4)");
+            eprintln!("  <duration>        Duration to record (e.g., 5s, 10m, 2h, 6h30m)");
+            eprintln!("  --web             Use web renderer instead of MP4 input (default: MP4)");
+            eprintln!("  --ram <size>      Allocate memory before starting (e.g., 100M, 2G)");
             eprintln!("");
             eprintln!("Examples:");
-            eprintln!("  {} 5s          - Record MP4 for 5 seconds", args[0]);
-            eprintln!("  {} --web 10m   - Record web page for 10 minutes", args[0]);
-            eprintln!("  {} --web 2h    - Record web page for 2 hours", args[0]);
+            eprintln!("  {} 5s                - Record MP4 for 5 seconds", args[0]);
+            eprintln!("  {} --web 10m         - Record web page for 10 minutes", args[0]);
+            eprintln!("  {} --ram 500M 5s     - Allocate 500MB RAM and record MP4", args[0]);
+            eprintln!("  {} --ram 2G --web 1h - Allocate 2GB RAM and record web page", args[0]);
             return Err(anyhow!("Missing duration argument"));
         }
+    };
+
+    // Initialize logging early
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .with_env_filter("smelter_crash=info,compositor_pipeline=warn,compositor_render=warn,compositor_chromium=info")
+        .init();
+
+    info!("Starting minimal smelter compositor");
+
+    // Allocate RAM if requested (before initializing compositor)
+    let _allocated_memory = if let Some(ram_size) = allocate_ram {
+        let bytes = parse_memory_size(&ram_size)?;
+        info!("Allocating {} bytes ({}) of RAM...", bytes, ram_size);
+        let memory: Vec<u8> = vec![0; bytes];
+        info!("Successfully allocated {} of RAM", ram_size);
+        Some(memory)
+    } else {
+        None
     };
 
     let input_source = if use_web {
@@ -63,13 +95,6 @@ fn main() -> Result<()> {
     } else {
         InputSource::Mp4
     };
-    // Initialize logging
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)
-        .with_env_filter("smelter_crash=info,compositor_pipeline=warn,compositor_render=warn,compositor_chromium=info")
-        .init();
-
-    info!("Starting minimal smelter compositor");
 
     // Remove existing output file if it exists
     let output_path = PathBuf::from(OUTPUT_VIDEO);
@@ -325,4 +350,35 @@ fn parse_duration(input: &str) -> Result<Duration> {
     }
 
     Ok(Duration::from_secs(total_secs))
+}
+
+fn parse_memory_size(input: &str) -> Result<usize> {
+    let input = input.trim().to_uppercase();
+
+    // Find where the number ends and the unit begins
+    let split_pos = input
+        .chars()
+        .position(|c| !c.is_ascii_digit())
+        .unwrap_or(input.len());
+
+    let (num_str, unit_str) = input.split_at(split_pos);
+
+    if num_str.is_empty() {
+        return Err(anyhow!("Invalid memory size format: missing number"));
+    }
+
+    let num: usize = num_str
+        .parse()
+        .context(format!("Failed to parse number: {}", num_str))?;
+
+    let multiplier: usize = match unit_str.trim() {
+        "" | "B" => 1,                          // Bytes
+        "K" | "KB" => 1024,                     // Kilobytes
+        "M" | "MB" => 1024 * 1024,              // Megabytes
+        "G" | "GB" => 1024 * 1024 * 1024,       // Gigabytes
+        _ => return Err(anyhow!("Invalid memory unit: '{}'. Use B, K/KB, M/MB, or G/GB", unit_str)),
+    };
+
+    num.checked_mul(multiplier)
+        .ok_or_else(|| anyhow!("Memory size too large: {} would overflow", input))
 }

@@ -23,13 +23,14 @@ cargo build --release
 ## Usage
 
 ```bash
-cargo run -- [--web] <duration>
+cargo run -- [--web] [--ram <size>] <duration>
 ```
 
 ### Arguments
 
 - `<duration>` - Duration to record (required)
 - `--web` - Use web renderer instead of MP4 input (optional, default: MP4)
+- `--ram <size>` - Allocate memory before starting (optional, e.g., 100M, 2G)
 
 **Note:** By default, the program records from the MP4 file in `assets/test.mp4`. Use `--web` flag to capture a web page instead.
 
@@ -60,6 +61,12 @@ cargo run -- --web 2h
 
 # Record web page for 6 hours and 30 minutes
 cargo run -- --web 6h30m
+
+# Allocate 500MB RAM and record MP4 for 5 seconds
+cargo run -- --ram 500M 5s
+
+# Allocate 2GB RAM and record web page for 1 hour
+cargo run -- --ram 2G --web 1h
 ```
 
 ## Configuration
