@@ -12,8 +12,7 @@ A minimal [Live Compositor](https://github.com/software-mansion/live-compositor)
 
 - Rust toolchain
 - FFmpeg libraries
-- Chromium dependencies (installed automatically via compositor)
-- **xvfb** (X Virtual Frame Buffer) for headless Chrome rendering
+- Chromium dependencies (installed automatically via compositor, only needed with `--web` flag)
 
 ## Building
 
@@ -23,21 +22,16 @@ cargo build --release
 
 ## Usage
 
-**Important:** Web rendering requires a display. Use `xvfb-run` to provide a virtual display:
-
 ```bash
-xvfb-run cargo run -- <duration>
+cargo run -- [--web] <duration>
 ```
 
-Or install xvfb if not already installed:
+### Arguments
 
-```bash
-# Ubuntu/Debian
-sudo apt-get install xvfb
+- `<duration>` - Duration to record (required)
+- `--web` - Use web renderer instead of MP4 input (optional, default: MP4)
 
-# Arch Linux
-sudo pacman -S xorg-server-xvfb
-```
+**Note:** By default, the program records from the MP4 file in `assets/test.mp4`. Use `--web` flag to capture a web page instead.
 
 ### Duration Format
 
@@ -52,20 +46,20 @@ You can combine multiple units:
 ### Examples
 
 ```bash
-# Record for 5 seconds
-xvfb-run cargo run -- 5s
+# Record MP4 for 5 seconds (default)
+cargo run -- 5s
 
-# Record for 10 minutes
-xvfb-run cargo run -- 10m
+# Record MP4 for 10 minutes
+cargo run -- 10m
 
-# Record for 2 hours
-xvfb-run cargo run -- 2h
+# Record web page for 5 seconds
+cargo run -- --web 5s
 
-# Record for 6 hours and 30 minutes
-xvfb-run cargo run -- 6h30m
+# Record web page for 2 hours
+cargo run -- --web 2h
 
-# Record for 1 hour, 15 minutes, and 30 seconds
-xvfb-run cargo run -- 1h15m30s
+# Record web page for 6 hours and 30 minutes
+cargo run -- --web 6h30m
 ```
 
 ## Configuration
@@ -73,7 +67,8 @@ xvfb-run cargo run -- 1h15m30s
 You can modify the following constants in `src/main.rs`:
 
 - `WIDTH` / `HEIGHT` - Output video resolution (default: 1920x1080)
-- `WEB_URL` - The web page to capture (default: https://google.com)
+- `WEB_URL` - The web page to capture when using `--web` (default: https://google.com)
+- `MP4_INPUT` - Input MP4 file in assets folder (default: test.mp4)
 - `OUTPUT_VIDEO` - Output filename (default: output.mp4)
 
 ## Output
@@ -84,9 +79,15 @@ The program will create `output.mp4` in the current directory. If the file alrea
 
 This is a minimal example that demonstrates:
 
-1. Initializing the compositor pipeline with web renderer enabled
-2. Registering a web renderer for a URL
-3. Creating a scene with the web view
+1. Initializing the compositor pipeline
+2. Registering inputs (MP4 file or web renderer)
+3. Creating a scene with the input
 4. Recording the output to an MP4 file
+5. Running the CEF event loop (required for web rendering)
 
-No windowing, no input switching - just a straightforward web page → MP4 pipeline.
+No windowing, no input switching - just a straightforward input → MP4 pipeline.
+
+### Key Implementation Details
+
+- **Default mode (MP4)**: Simple video input stream, no event loop needed
+- **Web mode (`--web`)**: Requires the CEF/Chromium event loop to run on the main thread for browser rendering to work

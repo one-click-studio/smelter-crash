@@ -1,11 +1,13 @@
 use anyhow::{anyhow, Context, Result};
 use compositor_pipeline::pipeline::encoder::*;
+use compositor_pipeline::pipeline::input::{mp4::*, InputOptions};
 use compositor_pipeline::pipeline::output::*;
 use compositor_pipeline::pipeline::*;
+use compositor_pipeline::queue::QueueInputOptions;
 use compositor_pipeline::Pipeline;
 use compositor_render::scene::*;
 use compositor_render::web_renderer::{WebEmbeddingMethod, WebRendererSpec};
-use compositor_render::{Framerate, OutputId, RendererId, RendererSpec, Resolution};
+use compositor_render::{Framerate, InputId, OutputId, RendererId, RendererSpec, Resolution};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -14,22 +16,53 @@ use tracing::info;
 const WIDTH: usize = 1920;
 const HEIGHT: usize = 1080;
 const WEB_URL: &str = "https://google.com";
+const MP4_INPUT: &str = "test.mp4";
 const OUTPUT_VIDEO: &str = "output.mp4";
 
+enum InputSource {
+    Mp4,
+    Web,
+}
+
 fn main() -> Result<()> {
-    // Parse duration from command line argument
+    // Parse command line arguments
     let args: Vec<String> = std::env::args().collect();
-    if args.len() != 2 {
-        eprintln!("Usage: {} <duration>", args[0]);
-        eprintln!("Examples:");
-        eprintln!("  {} 5s      - Record for 5 seconds", args[0]);
-        eprintln!("  {} 10m     - Record for 10 minutes", args[0]);
-        eprintln!("  {} 2h      - Record for 2 hours", args[0]);
-        eprintln!("  {} 6h30m   - Record for 6 hours and 30 minutes", args[0]);
-        return Err(anyhow!("Invalid number of arguments"));
+
+    let mut use_web = false;
+    let mut duration_arg = None;
+
+    for arg in args.iter().skip(1) {
+        if arg == "--web" {
+            use_web = true;
+        } else if duration_arg.is_none() {
+            duration_arg = Some(arg.as_str());
+        } else {
+            return Err(anyhow!("Unknown argument: {}", arg));
+        }
     }
 
-    let duration = parse_duration(&args[1])?;
+    let duration = match duration_arg {
+        Some(d) => parse_duration(d)?,
+        None => {
+            eprintln!("Usage: {} [--web] <duration>", args[0]);
+            eprintln!("");
+            eprintln!("Arguments:");
+            eprintln!("  <duration>    Duration to record (e.g., 5s, 10m, 2h, 6h30m)");
+            eprintln!("  --web         Use web renderer instead of MP4 input (default: MP4)");
+            eprintln!("");
+            eprintln!("Examples:");
+            eprintln!("  {} 5s          - Record MP4 for 5 seconds", args[0]);
+            eprintln!("  {} --web 10m   - Record web page for 10 minutes", args[0]);
+            eprintln!("  {} --web 2h    - Record web page for 2 hours", args[0]);
+            return Err(anyhow!("Missing duration argument"));
+        }
+    };
+
+    let input_source = if use_web {
+        InputSource::Web
+    } else {
+        InputSource::Mp4
+    };
     // Initialize logging
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::INFO)
@@ -66,7 +99,7 @@ fn main() -> Result<()> {
         },
         stream_fallback_timeout: Duration::from_millis(500),
         web_renderer: compositor_render::web_renderer::WebRendererInitOptions {
-            enable: true,
+            enable: matches!(input_source, InputSource::Web),
             enable_gpu: false,
         },
         force_gpu: false,
@@ -87,43 +120,95 @@ fn main() -> Result<()> {
     Pipeline::start(&pipeline);
     info!("Pipeline started");
 
-    // Register web renderer
-    let web_renderer_id = RendererId(Arc::from("web_renderer"));
-    Pipeline::register_renderer(
-        &pipeline,
-        web_renderer_id.clone(),
-        RendererSpec::WebRenderer(WebRendererSpec {
-            url: WEB_URL.to_string(),
-            resolution: Resolution {
-                width: WIDTH,
-                height: HEIGHT,
-            },
-            embedding_method: WebEmbeddingMethod::NativeEmbeddingOverContent,
-        }),
-    )?;
-    info!("Registered web renderer: {}", WEB_URL);
+    // Create scene based on input source
+    let scene = match input_source {
+        InputSource::Web => {
+            // Register web renderer
+            let web_renderer_id = RendererId(Arc::from("web_renderer"));
+            Pipeline::register_renderer(
+                &pipeline,
+                web_renderer_id.clone(),
+                RendererSpec::WebRenderer(WebRendererSpec {
+                    url: WEB_URL.to_string(),
+                    resolution: Resolution {
+                        width: WIDTH,
+                        height: HEIGHT,
+                    },
+                    embedding_method: WebEmbeddingMethod::NativeEmbeddingOverContent,
+                }),
+            )?;
+            info!("Registered web renderer: {}", WEB_URL);
 
-    // Create scene with web renderer wrapped in a Rescaler
-    let scene = Component::Rescaler(RescalerComponent {
-        id: None,
-        child: Box::new(Component::WebView(WebViewComponent {
-            id: None,
-            children: vec![],
-            instance_id: web_renderer_id.clone(),
-        })),
-        position: Position::Static {
-            width: None,
-            height: None,
-        },
-        transition: None,
-        mode: RescaleMode::Fit,
-        horizontal_align: HorizontalAlign::Center,
-        vertical_align: VerticalAlign::Center,
-        border_radius: BorderRadius::ZERO,
-        border_width: 0.0,
-        border_color: RGBAColor(0, 0, 0, 0),
-        box_shadow: vec![],
-    });
+            // Create scene with web renderer wrapped in a Rescaler
+            Component::Rescaler(RescalerComponent {
+                id: None,
+                child: Box::new(Component::WebView(WebViewComponent {
+                    id: None,
+                    children: vec![],
+                    instance_id: web_renderer_id.clone(),
+                })),
+                position: Position::Static {
+                    width: None,
+                    height: None,
+                },
+                transition: None,
+                mode: RescaleMode::Fit,
+                horizontal_align: HorizontalAlign::Center,
+                vertical_align: VerticalAlign::Center,
+                border_radius: BorderRadius::ZERO,
+                border_width: 0.0,
+                border_color: RGBAColor(0, 0, 0, 0),
+                box_shadow: vec![],
+            })
+        }
+        InputSource::Mp4 => {
+            // Register MP4 input
+            let assets_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets");
+            let video_path = assets_path.join(MP4_INPUT);
+            let video_input_id = InputId(Arc::from("video_input"));
+
+            let input_options = InputOptions::Mp4(Mp4Options {
+                source: Source::File(video_path.clone()),
+                should_loop: true,
+                video_decoder: VideoDecoder::FFmpegH264,
+            });
+
+            Pipeline::register_input(
+                &pipeline,
+                video_input_id.clone(),
+                RegisterInputOptions {
+                    input_options,
+                    queue_options: QueueInputOptions {
+                        required: false,
+                        offset: None,
+                        buffer_duration: Some(Duration::ZERO),
+                    },
+                },
+            )?;
+            info!("Registered MP4 input: {}", video_path.display());
+
+            // Create scene with MP4 input wrapped in a Rescaler
+            Component::Rescaler(RescalerComponent {
+                id: None,
+                child: Box::new(Component::InputStream(InputStreamComponent {
+                    id: None,
+                    input_id: video_input_id.clone(),
+                })),
+                position: Position::Static {
+                    width: None,
+                    height: None,
+                },
+                transition: None,
+                mode: RescaleMode::Fit,
+                horizontal_align: HorizontalAlign::Center,
+                vertical_align: VerticalAlign::Center,
+                border_radius: BorderRadius::ZERO,
+                border_width: 0.0,
+                border_color: RGBAColor(0, 0, 0, 0),
+                box_shadow: vec![],
+            })
+        }
+    };
 
     // Register MP4 output
     let output_id = OutputId(Arc::from("mp4_output"));
@@ -153,31 +238,51 @@ fn main() -> Result<()> {
     )?;
     info!("Started recording to {} for {:?}", output_path.display(), duration);
 
-    // Spawn a thread to handle the recording duration and stop
-    let pipeline_clone = pipeline.clone();
-    let output_id_clone = output_id.clone();
-    let output_path_clone = output_path.clone();
-    std::thread::spawn(move || {
-        // Record for specified duration
-        std::thread::sleep(duration);
+    // Handle event loop based on input source
+    match input_source {
+        InputSource::Web => {
+            // Web rendering requires the event loop to run on the main thread
+            // Spawn a thread to handle the recording duration and stop
+            let pipeline_clone = pipeline.clone();
+            let output_id_clone = output_id.clone();
+            let output_path_clone = output_path.clone();
+            std::thread::spawn(move || {
+                // Record for specified duration
+                std::thread::sleep(duration);
 
-        // Stop recording
-        let mut pipeline_lock = pipeline_clone.lock().unwrap();
-        if let Err(e) = Pipeline::unregister_output(&mut *pipeline_lock, &output_id_clone) {
-            eprintln!("Error unregistering output: {}", e);
+                // Stop recording
+                let mut pipeline_lock = pipeline_clone.lock().unwrap();
+                if let Err(e) = Pipeline::unregister_output(&mut *pipeline_lock, &output_id_clone) {
+                    eprintln!("Error unregistering output: {}", e);
+                }
+                drop(pipeline_lock);
+
+                // Give it a moment to finalize
+                std::thread::sleep(Duration::from_secs(1));
+
+                info!("Recording complete: {}", output_path_clone.display());
+                std::process::exit(0);
+            });
+
+            // Run the event loop on the main thread (required for CEF/Chromium)
+            info!("Starting event loop (required for web rendering)");
+            event_loop.run().context("Failed to run event loop")?;
         }
-        drop(pipeline_lock);
+        InputSource::Mp4 => {
+            // MP4 input doesn't need event loop, just wait for duration
+            std::thread::sleep(duration);
 
-        // Give it a moment to finalize
-        std::thread::sleep(Duration::from_secs(1));
+            // Stop recording
+            let mut pipeline_lock = pipeline.lock().unwrap();
+            Pipeline::unregister_output(&mut *pipeline_lock, &output_id)?;
+            drop(pipeline_lock);
 
-        info!("Recording complete: {}", output_path_clone.display());
-        std::process::exit(0);
-    });
+            // Give it a moment to finalize
+            std::thread::sleep(Duration::from_secs(1));
 
-    // Run the event loop on the main thread (required for CEF/Chromium)
-    info!("Starting event loop (required for web rendering)");
-    event_loop.run().context("Failed to run event loop")?;
+            info!("Recording complete: {}", output_path.display());
+        }
+    }
 
     Ok(())
 }
