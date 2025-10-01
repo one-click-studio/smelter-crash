@@ -1,13 +1,13 @@
 mod args;
 mod input;
+mod memory_monitor;
 mod output;
 mod ram;
-mod runner;
 
 use anyhow::{Context, Result};
 use compositor_pipeline::pipeline::GraphicsContext;
 use compositor_pipeline::Pipeline;
-use compositor_render::Framerate;
+use compositor_render::{EventLoop, Framerate, OutputId};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tracing::info;
@@ -23,6 +23,9 @@ fn main() -> Result<()> {
         .init();
 
     info!("Starting minimal smelter compositor");
+
+    // Start memory monitor
+    memory_monitor::start_memory_monitor();
 
     // Allocate and hold RAM if requested
     if let Some(ram_size) = args.allocate_ram {
@@ -50,7 +53,7 @@ fn main() -> Result<()> {
         },
         stream_fallback_timeout: Duration::from_millis(500),
         web_renderer: compositor_render::web_renderer::WebRendererInitOptions {
-            enable: args.use_web,
+            enable: true,
             enable_gpu: false,
         },
         force_gpu: false,
@@ -71,26 +74,29 @@ fn main() -> Result<()> {
     Pipeline::start(&pipeline);
     info!("Pipeline started");
 
-    // Setup input (MP4 or Web)
-    let scene = if args.use_web {
-        input::setup_web_input(&pipeline)?
-    } else {
-        input::setup_mp4_input(&pipeline)?
-    };
+    // Setup web input
+    let scene = input::setup_web_input(&pipeline)?;
 
-    // Setup output (MP4 recording or raw output)
-    let output_id = if let Some(duration) = args.duration {
-        output::setup_mp4_recording(&pipeline, scene, input::resolution(), duration)?
-    } else {
-        output::setup_raw_output(&pipeline, scene, input::resolution())?
-    };
+    // Setup raw output
+    let output_id = output::setup_raw_output(&pipeline, scene, input::resolution())?;
 
-    // Run based on input source
-    if args.use_web {
-        runner::run_with_event_loop(event_loop, pipeline, output_id, args.duration)?;
-    } else {
-        runner::run_without_event_loop(pipeline, output_id, args.duration)?;
-    }
+    // Run with event loop (required for web rendering)
+    run_with_event_loop(event_loop, pipeline, output_id)?;
+
+    Ok(())
+}
+
+fn run_with_event_loop(
+    event_loop: Arc<dyn EventLoop>,
+    _pipeline: Arc<Mutex<Pipeline>>,
+    _output_id: OutputId,
+) -> Result<()> {
+    // Raw output mode: run indefinitely
+    info!("Running in raw output mode (press Ctrl+C to exit)");
+
+    // Run the event loop on the main thread (required for CEF/Chromium)
+    info!("Starting event loop (required for web rendering)");
+    event_loop.run().context("Failed to run event loop")?;
 
     Ok(())
 }

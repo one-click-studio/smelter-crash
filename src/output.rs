@@ -1,57 +1,12 @@
 use anyhow::Result;
-use compositor_pipeline::pipeline::encoder::*;
 use compositor_pipeline::pipeline::output::*;
 use compositor_pipeline::pipeline::{OutputVideoOptions, PipelineOutputEndCondition, RegisterOutputOptions};
 use compositor_pipeline::Pipeline;
 use compositor_render::scene::Component;
 use compositor_render::{OutputId, Resolution};
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tracing::info;
-
-const OUTPUT_VIDEO: &str = "output.mp4";
-
-pub fn setup_mp4_recording(
-    pipeline: &Arc<Mutex<Pipeline>>,
-    scene: Component,
-    resolution: Resolution,
-    duration: Duration,
-) -> Result<OutputId> {
-    let output_path = PathBuf::from(OUTPUT_VIDEO);
-
-    // Remove existing output file if it exists
-    if output_path.exists() {
-        std::fs::remove_file(&output_path)?;
-        info!("Removed existing output file");
-    }
-
-    let output_id = OutputId(Arc::from("output"));
-    Pipeline::register_output(
-        pipeline,
-        output_id.clone(),
-        RegisterOutputOptions {
-            output_options: OutputOptions::Mp4(mp4::Mp4OutputOptions {
-                output_path: output_path.clone(),
-                video: Some(VideoEncoderOptions::H264(ffmpeg_h264::Options {
-                    preset: ffmpeg_h264::EncoderPreset::Medium,
-                    resolution,
-                    raw_options: vec![],
-                    pixel_format: OutputPixelFormat::YUV420P,
-                })),
-                audio: None,
-            }),
-            video: Some(OutputVideoOptions {
-                initial: scene,
-                end_condition: PipelineOutputEndCondition::Never,
-            }),
-            audio: None,
-        },
-    )?;
-    info!("Started recording to {} for {:?}", output_path.display(), duration);
-
-    Ok(output_id)
-}
 
 pub fn setup_raw_output(
     pipeline: &Arc<Mutex<Pipeline>>,
