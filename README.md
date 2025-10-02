@@ -1,22 +1,32 @@
-# Smelter Crash
+# Smelter crash
 
-Minimal [Live Compositor](https://github.com/software-mansion/live-compositor) example demonstrating web input and raw output.
+Minimal [Smelter](https://github.com/software-mansion/live-compositor) example to show how it can randomly crash on Linux when the RAM usage is around 2 GB.
+See the detailed explanation [here](./CRASH_EXPLAINATION.md).
 
 ## Requirements
-- Install Rust toolchain & FFmpeg libraries
+
 - Build the process_helper: `cargo build --bin process_helper`
 - Build the patch: `cargo build -p mallinfo-override`
 
 ## Usage
 
-```bash
-cargo run -- [OPTIONS]
+### Crash
+This project allows to allocate the right amount of RAM to trigger the bug. Run the test with:
+```sh
+cargo run -- --ram 2000MB
 ```
 
-**Options:**
-- `--ram <size>` - Allocate RAM before starting (e.g., `100M`, `2G`)
+You should start to have these warnings:
+```sh
+WARN smelter_crash::memory_monitor: arena + hblkhd > INT_MAX (176197632 + 2097156096 > 2147483647)
+```
+If not, check the Mallinfo logs while it runs to get the `arena` value. And change the RAM parameter that will influence `hblkhd`.
 
-## Crash
-- Regular run: `cargo run`
-- Crashes with "Illegal instruction" after a while: `cargo run -- --ram 2000MB`
-- Patched: `LD_PRELOAD=target/debug/libmallinfo_override.so cargo run -- --ram 2000MB`
+It should crash after a while with **Illegal instruction**.
+From our experience this usually takes from 10 to 60 minutes, but can take up to 2 hours.
+
+### Patch
+This command demonstrates how overriding mallinfo prevents the crash:
+```sh
+LD_PRELOAD=target/debug/libmallinfo_override.so cargo run -- --ram 2000MB
+```
