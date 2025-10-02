@@ -94,8 +94,7 @@ fn run_with_event_loop(
     // Raw output mode: run indefinitely
     info!("Running in raw output mode (press Ctrl+C to exit)");
 
-    // Run the event loop on the main thread (required for CEF/Chromium)
-    info!("Starting event loop (required for web rendering)");
+    // Run the CEF event loop on the main thread
     event_loop.run().context("Failed to run event loop")?;
 
     Ok(())

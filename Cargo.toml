@@ -1,3 +1,6 @@
+[workspace]
+members = [".", "mallinfo-override"]
+
 [package]
 name = "smelter-crash"
 version = "0.1.0"

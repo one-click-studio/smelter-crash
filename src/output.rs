@@ -60,7 +60,7 @@ pub fn setup_raw_output(
         info!("Warning: No video receiver available for raw output");
     }
 
-    info!("Started raw output mode (running indefinitely)");
+    info!("Started raw output (running indefinitely)");
 
     Ok(output_id)
 }

@@ -5,6 +5,7 @@ Minimal [Live Compositor](https://github.com/software-mansion/live-compositor) e
 ## Requirements
 - Install Rust toolchain & FFmpeg libraries
 - Build the process_helper: `cargo build --bin process_helper`
+- Build the patch: `cargo build -p mallinfo-override`
 
 ## Usage
 
@@ -16,6 +17,6 @@ cargo run -- [OPTIONS]
 - `--ram <size>` - Allocate RAM before starting (e.g., `100M`, `2G`)
 
 ## Crash
-- Does run: `cargo run`
+- Regular run: `cargo run`
 - Crashes with "Illegal instruction" after a while: `cargo run -- --ram 2000MB`
-
+- Patched: `LD_PRELOAD=target/debug/libmallinfo_override.so cargo run -- --ram 2000MB`
