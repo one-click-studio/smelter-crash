@@ -2,7 +2,7 @@
 
 ## Context
 
-Smelter can randomly crash when CEF / Chromium is enabled and it uses around 2 GB of RAM:
+Smelter can randomly crash when CEF / Chromium is enabled and the process uses around 2 GB of RAM:
 ```rs
 Thread 43 "MemoryInfra" received signal SIGILL, Illegal instruction.
 [Switching to Thread 0x7fff86000680 (LWP 2621)]
@@ -14,9 +14,9 @@ From our experience this usually occurs after 10 to 60 minutes.
 
 ## Explanation
 
-The crash occurs in CEF, in the `ReportAppleAllocStats` function from `malloc_dump_provider.cc` (see [source code](https://chromium.googlesource.com/chromium/src.git/+/refs/tags/132.0.6834.83/base/trace_event/malloc_dump_provider.cc#452)).
+Using GDB, we identified that the crash occurs in CEF, in the `ReportAppleAllocStats` function from `malloc_dump_provider.cc` (see [source code](https://chromium.googlesource.com/chromium/src.git/+/refs/tags/132.0.6834.83/base/trace_event/malloc_dump_provider.cc#452)).
 
-This is part of a thread responsible for collecting memory usage statistics. On Linux, it relies on GLIBC's `mallinfo` or `mallinfo2`. Whether one or the other is used is determined during the build:
+This is part of a thread called "MemoryInfra", responsible for collecting memory usage statistics. On Linux, it relies on GLIBC's `mallinfo` or `mallinfo2`. Whether one or the other is used is determined during CEF's build:
 ```c++
 #if defined(__GLIBC__) && defined(__GLIBC_PREREQ)
 #if __GLIBC_PREREQ(2, 33)
@@ -41,16 +41,16 @@ And `checked_cast` will crash if the values passed are < 0.
 
 ## Consequence
 
-This means depending on the memory usage of the application, it will crash if:
+This means depending on the memory usage of the application, it will crash if any of:
 - **arena + hblkhd** > i32::MAX
 - **uordblks** > i32::MAX
 
-This is tricky as **arena** or **hblkhd** can overflow themselves, but it's fine as long as their sum is >= 0. And most memory stats collection is already disabled from CEF in Smelter. But it can still occasionally run.
+This is tricky as **arena** or **hblkhd** can individually overflow but it's fine as long as their sum is >= 0. So the crash only occurs with specific amount of RAM usage of the whole app. And most memory stats collection are already disabled from CEF in Smelter. So the MemoryInfra run the problematic function only on rare occasions.
 
 
 ## Proposed patch
 
-We would use a CEF build made against more recent libraries.
+We could use a CEF build made against a more recent Glibc library.
 But as a simpler solution, we decided to build a custom .so library that overrides mallinfo by being loaded first with LD_PRELOAD. This version ensures the values returned will not overflow when used by CEF.
 
 See [mallinfo-override](./mallinfo-override).
